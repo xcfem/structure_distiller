@@ -31,7 +31,11 @@ class StructureDistiller(object):
         self.modelName= modelName
         self.reps= dict()
         self.ownerHistory= None
+        self.globalAxes= None
         self.localPlacement= None
+        self.building= None
+        self.analysisModel= None
+        self.ifcElements= list()
 
     def createHeader(self):
         self.ifcModel.wrapped_data.header.file_name.name = os.path.basename(self.outputFileName)
@@ -46,8 +50,12 @@ class StructureDistiller(object):
         yAxis= self.ifcModel.createIfcDirection((0.0, 1.0, 0.0))
         zAxis= self.ifcModel.createIfcDirection((0.0, 0.0, 1.0))
         origin= self.ifcModel.createIfcCartesianPoint((0.0, 0.0, 0.0))
-        axes= self.ifcModel.createIfcAxis2Placement3D(origin, zAxis, xAxis)
-        return axes
+        self.globalAxes= self.ifcModel.createIfcAxis2Placement3D(origin, zAxis, xAxis)
+
+    def createLocalPlacement(self, relative_to= None):
+        if(self.globalAxes==None):
+            self.createGlobalAxes()
+        return self.ifcModel.createIfcLocalPlacement(relative_to,self.globalAxes)
 
     def createOwnerHistory(self):
         ''' Create IFC owner history. IfcOwnerHistory is used to identify 
@@ -68,8 +76,8 @@ class StructureDistiller(object):
         timestamp = int(datetime.now().timestamp())
         return self.ifcModel.createIfcOwnerHistory(p_o, application, "READWRITE", None, None, None, None, timestamp)
     
-    def createReferenceSubrep(self, globalAxes):
-        modelRep = self.ifcModel.createIfcGeometricRepresentationContext(None, "Model", 3, 1.0e-05, globalAxes, None)
+    def createReferenceSubrep(self):
+        modelRep = self.ifcModel.createIfcGeometricRepresentationContext(None, "Model", 3, 1.0e-05, self.globalAxes, None)
         bodySubRep = self.ifcModel.createIfcGeometricRepresentationSubContext("Body", "Model", None, None, None, None, modelRep, None, "MODEL_VIEW", None)
         refSubRep = self.ifcModel.createIfcGeometricRepresentationSubContext("Reference", "Model", None, None, None, None, modelRep, None, "GRAPH_VIEW", None)
 
@@ -84,36 +92,48 @@ class StructureDistiller(object):
         self.createHeader() # create header
         
         # create global axes
-        globalAxes= self.createGlobalAxes()
-        self.localPlacement= self.ifcModel.createIfcLocalPlacement(None, globalAxes)
+        self.localPlacement= self.createLocalPlacement()
         
         # create units
         lengthUnit= self.ifcModel.createIfcSIUnit(None, "LENGTHUNIT", None, "METRE")
         unitAssignment= self.ifcModel.createIfcUnitAssignment((lengthUnit,))
 
         self.ownerHistory= self.createOwnerHistory() # create owner history
+
+        self.reps = self.createReferenceSubrep() # create representations and subrepresentations
         
-        self.reps = self.createReferenceSubrep(globalAxes) # create representations and subrepresentations
+        # IFC hierarcy creation.
         
         # create project
         project = self.ifcModel.createIfcProject(
             self.guid(), self.ownerHistory, "A Project", None, None, None, None, (self.reps["model"],), unitAssignment
         )
+
+        sitePlacement= self.createLocalPlacement()
+        site= self.ifcModel.createIfcSite(self.guid(), self.ownerHistory, "Site", None, None, sitePlacement, None, None, "ELEMENT", None, None, None, None, None)
+        buildingPlacement= self.createLocalPlacement()
+        self.building= self.ifcModel.createIfcBuilding(self.guid(), self.ownerHistory, 'Building', None, None, buildingPlacement, None, None, "ELEMENT", None, None, None)
+
+        containerSite = self.ifcModel.createIfcRelAggregates(self.guid(), self.ownerHistory, "Site Container", None, site, [self.building])
+        containerProject = self.ifcModel.createIfcRelAggregates(self.guid(), self.ownerHistory, "Project Container", None, project, [site])
+        
+
         
         # create model
-        model = self.ifcModel.createIfcStructuralAnalysisModel(
+        self.analysisModel= self.ifcModel.createIfcStructuralAnalysisModel(
             self.guid(),
             self.ownerHistory,
             self.modelName,
             None,
             None,
             "NOTDEFINED",
-            globalAxes,
+            self.globalAxes,
             None,
             None,
             self.localPlacement,
         )
-        self.ifcModel.createIfcRelDeclares(self.guid(), self.ownerHistory, None, None, project, (model,))
+        self.ifcModel.createIfcRelDeclares(self.guid(), self.ownerHistory, None, None, project, (self.analysisModel,))
+        
 
     def createSurfaceGeometry(self, wires):
         ''' Create an IfcFaceSurface object from the wires argument.
@@ -149,6 +169,30 @@ class StructureDistiller(object):
         topologyRep = self.ifcModel.createIfcTopologyRepresentation(self.reps["reference"], "Reference", "Face", (ifcFaceSurface,))
         return self.ifcModel.createIfcProductDefinitionShape(None, None, (topologyRep,))
 
+    def createMaterial(self, materialData):
+        ''' Create IFC material from the data argument.
+
+        :param materialData: dictionary containing material names and 
+                             thicknesses for each layer. 
+        '''
+        materialLayers= list()
+        for matData in materialData:
+            name= matData['materialName']
+            if(name==None):
+                name= 'air'
+            thickness= matData['thickness']
+            print('name= ', name)
+            material= self.ifcModel.createIfcMaterial(name)
+            materialLayer= self.ifcModel.createIfcMaterialLayer(material, thickness, None)
+            materialLayers.append(materialLayer)
+            print(materialLayers)
+            
+        materialLayerSet= self.ifcModel.createIfcMaterialLayerSet(materialLayers, None)
+        materialLayerSetUsage= self.ifcModel.createIfcMaterialLayerSetUsage(materialLayerSet, "AXIS2", "POSITIVE", 0.0)
+        return materialLayerSetUsage
+        
+
+
     def dumpSurfaces(self, surfaces):
         ''' Create the IfcStructuralSurfaceMember objects corresponding to
             the surface arguments.
@@ -159,11 +203,15 @@ class StructureDistiller(object):
             shapeData= surfaces[shapeKey]
             wires= shapeData['midSectionWires']
             prodDefShape = self.createDefinitionShape(wires)
-            uid = self.guid()
             label= str(shapeKey)
-            thickness= 0.1
-            self.ifcModel.createIfcStructuralSurfaceMember(uid, self.ownerHistory, label, None, None, self.localPlacement, prodDefShape, "SHELL", thickness)
+            thickness= shapeData['thickness']
+            materialLayerSetUsage= self.createMaterial(shapeData['materials'])
+            surface= self.ifcModel.createIfcStructuralSurfaceMember(self.guid(), self.ownerHistory, label, None, None, self.localPlacement, prodDefShape, "SHELL", thickness)
+            self.ifcElements.append(surface)
+            self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[surface], RelatingMaterial= materialLayerSetUsage)
         
     def write(self):
         ''' Writes the IFC file.'''
+        # assign elements
+        self.ifcModel.createIfcRelAssignsToGroup(self.guid(), self.ownerHistory, None, None, tuple(self.ifcElements), None, self.analysisModel)
         self.ifcModel.write(self.outputFileName)
