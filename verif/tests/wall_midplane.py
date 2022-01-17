@@ -7,6 +7,10 @@ __license__= "GPL"
 __version__= "3.0"
 __email__= "l.pereztato@ciccp.es"
 
+import os
+import pwd
+from datetime import datetime
+
 import ifcopenshell
 import ifcopenshell.geom
 
@@ -23,6 +27,8 @@ from OCC.Core.BRep import BRep_Tool
 
 import xc_base
 import geom
+from structure_distiller import structure_distiller
+
 
 def getBoundingBox(shape, tol=1e-6) -> tuple:
     """ return the bounding box of the TopoDS_Shape `shape`
@@ -129,52 +135,9 @@ def extractVertices(section):
         exp.Next()
     return retval
 
-def createStructuralContext(ifcfile):
 
-    """Creates an additional geometry context for structural objects. Returns the new context"""
-
-    contexts = ifcfile.by_type("IfcGeometricRepresentationContext")
-    # filter out subcontexts
-    contexts = [c for c in contexts if c.is_a() == "IfcGeometricRepresentationContext"]
-    geomContext = contexts[0] # arbitrarily take the first one...
-    structContext = ifcfile.createIfcGeometricRepresentationSubContext(
-        'Analysis', 'Axis', None, None, None, None, geomContext, None, "GRAPH_VIEW", None)
-    return structContext
-
-def createFaceSurface(ifcModel, wires):
-    ''' Create an IfcFaceSurface object from the wires argument.
-
-    :param ifcModel: IFC model where the IfcFaceSurface will be created.
-    :param wires: polygons defining the surface and its holes (if any).
-    '''
-    sz= len(wires)
-    faceBounds= list()
-    if(sz>0): # Outer bound.
-        outerBoundWire= wires[0]
-        ifcPoints= list()
-        for p in outerBoundWire[:-1]:
-            ifcPoints.append(ifcModel.createIfcCartesianPoint((p.x, p.y, p.z)))
-        polyLoop= ifcModel.createIfcPolyLoop(ifcPoints)
-        outerBound= ifcModel.createIfcFaceOuterBound(Bound=polyLoop, Orientation=True)  # orientation of vertices is CCW
-        faceBounds.append(outerBound)
-    if(sz>1): # Inner bounds.
-        for interiorWire in wires[1:]:
-            ifcPoints= list()
-            for p in interiorWire[:-1]:
-                ifcPoints.append(ifcModel.createIfcCartesianPoint((p.x, p.y, p.z)))
-            polyLoop= ifcModel.createIfcPolyLoop(ifcPoints)
-            innerBound= ifcModel.createIfcFaceBound(Bound=polyLoop, Orientation=False) # orientation of vertices is CW
-            faceBounds.append(innerBound)
-    return ifcModel.createIfcFaceSurface(Bounds= faceBounds)
             
-
-def createGlobalAxes(ifcModel):
-    xAxis= ifcModel.createIfcDirection((1.0, 0.0, 0.0))
-    yAxis= ifcModel.createIfcDirection((0.0, 1.0, 0.0))
-    zAxis= ifcModel.createIfcDirection((0.0, 0.0, 1.0))
-    origin= ifcModel.createIfcCartesianPoint((0.0, 0.0, 0.0))
-    axes= ifcModel.createIfcAxis2Placement3D(origin, zAxis, xAxis)
-    return axes
+        
         
 # Open the IFC file using IfcOpenShell
 import os
@@ -206,34 +169,10 @@ for product in products:
         product_shapes[product.id()]= {'product':product, 'shape':shape, 'midPlane':midPlane, 'midSection':midSection, 'midSectionWires':midSectionWires}
 
 # Write ouput
-outputFile= ifcopenshell.file(schema=inputFile.schema)
-ifcProject= inputFile.by_type("IfcProject")[0]
-outputFile.add(ifcProject)
-uid = ifcopenshell.guid.new
-owhList= outputFile.by_type("IfcOwnerHistory")
-if(len(owhList)>0):
-    owh= owhList[0]
-else:
-    owh= outputFile.createIfcOwnerHistory()
-globalAxes= createGlobalAxes(outputFile)
-localPlacement= outputFile.createIfcLocalPlacement(None, globalAxes)
-structContext = createStructuralContext(outputFile)
-mod = outputFile.createIfcStructuralAnalysisModel(uid(),owh,"Structural Analysis Model",None,None,"NOTDEFINED",None,None,None,localPlacement)
+outputModel= structure_distiller.StructureDistiller(outputFileName= '/tmp/test.ifc', modelName= 'Structural Analysis Model')
 
-for shapeKey in product_shapes:
-    print(shapeKey)
-    shapeData= product_shapes[shapeKey]
-    wires= shapeData['midSectionWires']
-    ifcFaceSurface= createFaceSurface(outputFile, wires)
-    uid = ifcopenshell.guid.new()
-    label= str(shapeKey)
-    topologyRep = outputFile.createIfcTopologyRepresentation(structContext, "Analysis", "Face", (ifcFaceSurface,))
-    prodDefShape = outputFile.createIfcProductDefinitionShape(None, None, (topologyRep,))
-    thickness= 0.1
-    outputFile.createIfcStructuralSurfaceMember(uid, owh, label, None, None, localPlacement, prodDefShape, "SHELL", thickness)
-
-outputFileName= '/tmp/test.ifc'
-outputFile.write(outputFileName)
-
+outputModel.setup()
+outputModel.dumpSurfaces(product_shapes)
+outputModel.write()
 
 

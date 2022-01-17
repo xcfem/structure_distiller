@@ -1,0 +1,1 @@
+/usr/local/lib/python3.8/dist-packages/structure_distiller-0.1.0-py3.8.egg
