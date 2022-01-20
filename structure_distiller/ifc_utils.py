@@ -13,6 +13,7 @@ import ifcopenshell.geom
 
 import OCC.Core.gp
 import OCC.Core.BRepBuilderAPI
+import OCC.Core.BRepAlgoAPI
 import OCC.Core.TopExp
 import OCC.Core.ShapeAnalysis
 from OCC.Core.GProp import GProp_GProps
@@ -24,6 +25,7 @@ from OCC.Core.BRep import BRep_Tool
 
 import xc_base
 import geom
+import numpy as np
 
 def getBoundingBox(shape, tol:float =1e-6) -> tuple:
     """ return the bounding box of the TopoDS_Shape `shape`
@@ -62,9 +64,10 @@ def getMidPlane(shape, tol= 1e-6):
          (_m.Row(row + 1).X(), _m.Row(row + 1).Y(), _m.Row(row + 1).Z())
          for row in range(3)
      ]
-    v0= geom.Vector3d(matrix_of_inertia[0][0], matrix_of_inertia[0][1], matrix_of_inertia[0][2])
-    v1= geom.Vector3d(matrix_of_inertia[1][0], matrix_of_inertia[1][1], matrix_of_inertia[1][2])
-    v2= geom.Vector3d(matrix_of_inertia[2][0], matrix_of_inertia[2][1], matrix_of_inertia[2][2])
+    eigenvalues, eigenvectors = np.linalg.eig(np.array(matrix_of_inertia))
+    v0= geom.Vector3d(eigenvectors[0][0], eigenvectors[0][1], eigenvectors[0][2])
+    v1= geom.Vector3d(eigenvectors[1][0], eigenvectors[1][1], eigenvectors[1][2])
+    v2= geom.Vector3d(eigenvectors[2][0], eigenvectors[2][1], eigenvectors[2][2])
     shapeVectors= [v0, v1, v2]
 
     ref= geom.Ref3d3d(centroidPos, centroidPos+v0, centroidPos+v1)
@@ -75,13 +78,14 @@ def getMidPlane(shape, tol= 1e-6):
 
     localMin= ref.getLocalPosition(pMin)
     localMax= ref.getLocalPosition(pMax)
-    shapeDimensions= [localMax.x-localMin.x, localMax.y-localMin.y, localMax.z-localMin.z]
+    shapeDimensions= [abs(localMax.x-localMin.x), abs(localMax.y-localMin.y), abs(localMax.z-localMin.z)]
 
     # Compute index of minimum dimension
     thickness, idx = min((thickness, idx) for (idx, thickness) in enumerate(shapeDimensions))
+    extension= max(shapeDimensions) # Compute maximum dimension.
     normalVector= shapeVectors[idx]
     midPlane= OCC.Core.gp.gp_Pln( OCC.Core.gp.gp_Pnt(centroidPos.x, centroidPos.y, centroidPos.z), OCC.Core.gp.gp_Dir(normalVector.x, normalVector.y, normalVector.z) )
-    return midPlane, thickness
+    return midPlane, thickness, extension
 
 def extractEdges(section):
     ''' Return a edges of the section argument.'''
@@ -111,12 +115,11 @@ def extractWires(section):
         # A wire is formed by connecting the edges
         polylines= geom.get_3d_polylines(segments,.001)
         retval= polylines
-          
     return retval
 
-def extractVertices(section):
-    ''' Return the vertices of the section argument.'''
-    exp = OCC.Core.TopExp.TopExp_Explorer(section, OCC.Core.TopAbs.TopAbs_VERTEX)
+def extractVertices(edge):
+    ''' Return the vertices of the edge argument.'''
+    exp = OCC.Core.TopExp.TopExp_Explorer(edge, OCC.Core.TopAbs.TopAbs_VERTEX)
     retval= list()
     while exp.More():
         retval.append(OCC.Core.TopoDS.topods.Vertex(exp.Current()))
@@ -177,10 +180,11 @@ def computeMidSurfaces(productShapes):
         product= productData['product']
         shape= productData['shape']
         materialList= productData['materials']
-        midPlane, thickness= getMidPlane(shape)
-        midSection= OCC.Core.BRepBuilderAPI.BRepBuilderAPI_MakeFace(midPlane, -10, 10, -10, 10).Face()
-        midSectionWires= extractWires(midSection)
-        retval[product.id()]= {'product':product, 'shape':shape, 'midPlane':midPlane, 'midSection':midSection, 'midSectionWires':midSectionWires, 'thickness':thickness,'materials':materialList}
+        midPlane, thickness, extension= getMidPlane(shape)
+        midSectionFace= OCC.Core.BRepBuilderAPI.BRepBuilderAPI_MakeFace(midPlane, -extension, extension, -extension, extension).Face()
+        shapeSection= OCC.Core.BRepAlgoAPI.BRepAlgoAPI_Section(midSectionFace, shape).Shape()
+        midSectionWires= extractWires(shapeSection)
+        retval[product.id()]= {'product':product, 'shape':shape, 'midPlane':midPlane, 'midSection':midSectionFace, 'midSectionWires':midSectionWires, 'thickness':thickness,'materials':materialList}
 
     return retval
 

@@ -278,8 +278,8 @@ class StructureDistiller(object):
             thickness= shapeData['thickness']
             surface= self.ifcModel.createIfcStructuralSurfaceMember(self.guid(), self.ownerHistory, label, None, None, self.localPlacement, prodDefShape, "SHELL", thickness)
             self.ifcElements.append(surface)
-            materialLayerSetUsage= self.createMaterial(shapeData['materials'])
-            self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[surface], RelatingMaterial= materialLayerSetUsage)
+            #materialLayerSetUsage= self.createMaterial(shapeData['materials'])
+            #self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[surface], RelatingMaterial= materialLayerSetUsage)
         
     def write(self):
         ''' Writes the IFC file.'''
