@@ -7,9 +7,13 @@ __license__= "GPL"
 __version__= "3.0"
 __email__= "l.pereztato@ciccp.es"
 
+import xc_base
+import geom
+
 import os
 import pwd
 from datetime import datetime
+
 
 import ifcopenshell
 
@@ -109,13 +113,13 @@ class StructureDistiller(object):
             self.guid(), self.ownerHistory, "A Project", None, None, None, None, (self.reps["model"],), unitAssignment
         )
 
-        sitePlacement= self.createLocalPlacement()
-        site= self.ifcModel.createIfcSite(self.guid(), self.ownerHistory, "Site", None, None, sitePlacement, None, None, "ELEMENT", None, None, None, None, None)
-        buildingPlacement= self.createLocalPlacement()
-        self.building= self.ifcModel.createIfcBuilding(self.guid(), self.ownerHistory, 'Building', None, None, buildingPlacement, None, None, "ELEMENT", None, None, None)
+        # sitePlacement= self.createLocalPlacement()
+        # site= self.ifcModel.createIfcSite(self.guid(), self.ownerHistory, "Site", None, None, sitePlacement, None, None, "ELEMENT", None, None, None, None, None)
+        # buildingPlacement= self.createLocalPlacement()
+        # self.building= self.ifcModel.createIfcBuilding(self.guid(), self.ownerHistory, 'Building', None, None, buildingPlacement, None, None, "ELEMENT", None, None, None)
 
-        containerSite = self.ifcModel.createIfcRelAggregates(self.guid(), self.ownerHistory, "Site Container", None, site, [self.building])
-        containerProject = self.ifcModel.createIfcRelAggregates(self.guid(), self.ownerHistory, "Project Container", None, project, [site])
+        # containerSite = self.ifcModel.createIfcRelAggregates(self.guid(), self.ownerHistory, "Site Container", None, site, [self.building])
+        # containerProject = self.ifcModel.createIfcRelAggregates(self.guid(), self.ownerHistory, "Project Container", None, project, [site])
         
 
         
@@ -135,31 +139,100 @@ class StructureDistiller(object):
         self.ifcModel.createIfcRelDeclares(self.guid(), self.ownerHistory, None, None, project, (self.analysisModel,))
         
 
+    # def createSurfaceGeometry(self, wires):
+    #     ''' Create an IfcFaceSurface object from the wires argument.
+
+    #     :param wires: polygons defining the surface and its holes (if any).
+    #     '''
+    #     sz= len(wires)
+    #     faceBounds= list()
+    #     if(sz>0): # Outer bound.
+    #         outerBoundWire= wires[0]
+    #         ifcPoints= list()
+    #         for p in outerBoundWire[:-1]:
+    #             ifcPoints.append(self.ifcModel.createIfcCartesianPoint((p.x, p.y, p.z)))
+    #         polyLoop= self.ifcModel.createIfcPolyLoop(ifcPoints)
+    #         outerBound= self.ifcModel.createIfcFaceOuterBound(Bound=polyLoop, Orientation=True)  # orientation of vertices is CCW
+    #         faceBounds.append(outerBound)
+    #     if(sz>1): # Inner bounds.
+    #         for interiorWire in wires[1:]:
+    #             ifcPoints= list()
+    #             for p in interiorWire[:-1]:
+    #                 ifcPoints.append(self.ifcModel.createIfcCartesianPoint((p.x, p.y, p.z)))
+    #             polyLoop= self.ifcModel.createIfcPolyLoop(ifcPoints)
+    #             innerBound= self.ifcModel.createIfcFaceBound(Bound=polyLoop, Orientation=False) # orientation of vertices is CW
+    #             faceBounds.append(innerBound)
+    #     return self.ifcModel.createIfcFaceSurface(Bounds= faceBounds)
+
+    def createFaceBound(self, plg, outerBound):
+        ''' Create an IfcFaceOuterBound or an IfcBound object from 
+            the polygon argument.
+
+        :param plg: point sequence.
+        :param outerBound: if true the polygon defines an outer bound 
+                           of the face.
+        '''
+        retval= None
+        # Create vertices.
+        ifcVertices= list()
+        for p in plg[:-1]:
+            pt= self.ifcModel.createIfcCartesianPoint((p.x, p.y, p.z))
+            vertex= self.ifcModel.createIfcVertexPoint(pt)
+            ifcVertices.append(vertex)
+        # Create edges.
+        orientedEdges= list()
+        for i, v in enumerate(ifcVertices):
+            v2Index= (i + 1) if i < len(ifcVertices) - 1 else 0
+            edge= self.ifcModel.createIfcEdge(v, ifcVertices[v2Index])
+            orientedEdges.append(self.ifcModel.createIfcOrientedEdge(None, None, edge, True))
+        # Create edge loop.
+        edgeLoop= self.ifcModel.createIfcEdgeLoop(tuple(orientedEdges))
+        if(outerBound):
+            retval= self.ifcModel.createIfcFaceOuterBound(Bound= edgeLoop, Orientation= True)  # orientation of vertices is CCW
+        else:
+            retval= self.ifcModel.createIfcFaceBound(Bound= edgeLoop, Orientation= False) # orientation of vertices is CW
+        return retval
+
+    def createPlane(self, plg):
+        ''' Create an IfcPlane object from the polygon argument.
+
+        :param plg: point sequence.
+        '''
+        points= list()
+        for p in plg[:-1]:
+            points.append(p)
+        plane= geom.Plane3d(points)
+        xAxis= plane.getBase1()
+        ifcXAxis= self.ifcModel.createIfcDirection((xAxis.x,xAxis.y,xAxis.z))
+        zAxis= plane.getNormal()
+        ifcZAxis= self.ifcModel.createIfcDirection((zAxis.x,zAxis.y,zAxis.z))
+        origin= plg.getCenterOfMass()
+        ifcOrigin= self.ifcModel.createIfcCartesianPoint((origin.x, origin.y, origin.z))
+        localAxes= self.ifcModel.createIfcAxis2Placement3D(ifcOrigin, ifcZAxis, ifcXAxis)
+        return self.ifcModel.createIfcPlane(localAxes)
+        
+                
     def createSurfaceGeometry(self, wires):
         ''' Create an IfcFaceSurface object from the wires argument.
 
         :param wires: polygons defining the surface and its holes (if any).
         '''
         sz= len(wires)
-        faceBounds= list()
+        retval= None
         if(sz>0): # Outer bound.
+            faceBounds= list()
             outerBoundWire= wires[0]
-            ifcPoints= list()
-            for p in outerBoundWire[:-1]:
-                ifcPoints.append(self.ifcModel.createIfcCartesianPoint((p.x, p.y, p.z)))
-            polyLoop= self.ifcModel.createIfcPolyLoop(ifcPoints)
-            outerBound= self.ifcModel.createIfcFaceOuterBound(Bound=polyLoop, Orientation=True)  # orientation of vertices is CCW
-            faceBounds.append(outerBound)
-        if(sz>1): # Inner bounds.
-            for interiorWire in wires[1:]:
-                ifcPoints= list()
-                for p in interiorWire[:-1]:
-                    ifcPoints.append(self.ifcModel.createIfcCartesianPoint((p.x, p.y, p.z)))
-                polyLoop= self.ifcModel.createIfcPolyLoop(ifcPoints)
-                innerBound= self.ifcModel.createIfcFaceBound(Bound=polyLoop, Orientation=False) # orientation of vertices is CW
-                faceBounds.append(innerBound)
-        return self.ifcModel.createIfcFaceSurface(Bounds= faceBounds)
-
+            faceBounds.append(self.createFaceBound(plg= outerBoundWire, outerBound= True))
+            ifcPlane= self.createPlane(plg= outerBoundWire)
+            
+            if(sz>1): # Ther are inner bounds.
+                for interiorWire in wires[1:]:
+                    faceBounds.append(self.createFaceBound(plg= interiorWire, outerBound= False))
+            retval= self.ifcModel.createIfcFaceSurface(faceBounds, ifcPlane, True)
+        else:
+            print('error.')
+        return retval
+                
     def createDefinitionShape(self, wires):
         ''' Create the product definition shape.
 
@@ -181,11 +254,9 @@ class StructureDistiller(object):
             if(name==None):
                 name= 'air'
             thickness= matData['thickness']
-            print('name= ', name)
             material= self.ifcModel.createIfcMaterial(name)
             materialLayer= self.ifcModel.createIfcMaterialLayer(material, thickness, None)
             materialLayers.append(materialLayer)
-            print(materialLayers)
             
         materialLayerSet= self.ifcModel.createIfcMaterialLayerSet(materialLayers, None)
         materialLayerSetUsage= self.ifcModel.createIfcMaterialLayerSetUsage(materialLayerSet, "AXIS2", "POSITIVE", 0.0)
@@ -205,10 +276,10 @@ class StructureDistiller(object):
             prodDefShape = self.createDefinitionShape(wires)
             label= str(shapeKey)
             thickness= shapeData['thickness']
-            materialLayerSetUsage= self.createMaterial(shapeData['materials'])
             surface= self.ifcModel.createIfcStructuralSurfaceMember(self.guid(), self.ownerHistory, label, None, None, self.localPlacement, prodDefShape, "SHELL", thickness)
             self.ifcElements.append(surface)
-            self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[surface], RelatingMaterial= materialLayerSetUsage)
+            #materialLayerSetUsage= self.createMaterial(shapeData['materials'])
+            #self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[surface], RelatingMaterial= materialLayerSetUsage)
         
     def write(self):
         ''' Writes the IFC file.'''
