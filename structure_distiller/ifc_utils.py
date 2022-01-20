@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-''' Compute wall mid-plane and beam-column axes for use in structural 
+''' Compute shell mid-surface and beam-column axes for use in structural 
     analytical model.'''
 
 __author__= "Luis C. Pérez Tato (LCPT) and Ana Ortega (AOO)"
@@ -135,7 +135,6 @@ def getMaterials(ifcProduct):
                      retval.append(materials.Name)
              if i.RelatingMaterial.is_a('IfcMaterialLayerSetUsage'):
                  for materials in i.RelatingMaterial.ForLayerSet.MaterialLayers:
-                     print('materials: ', materials)
                      material= materials.Material
                      materialName= None
                      if(material):
