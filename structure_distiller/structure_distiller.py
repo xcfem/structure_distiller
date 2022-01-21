@@ -17,6 +17,7 @@ from datetime import datetime
 
 
 import ifcopenshell
+from misc_utils import log_messages as lmsg
 
 class StructureDistiller(object):
     ''' Tools to create an structural analysis model from an IFC 

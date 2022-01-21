@@ -13,6 +13,8 @@ import sys
 import ifcopenshell
 import ifcopenshell.geom
 
+from misc_utils import log_messages as lmsg
+
 import OCC.Core.gp
 import OCC.Core.BRepBuilderAPI
 import OCC.Core.BRepAlgoAPI
@@ -250,7 +252,7 @@ def getProductShapes(ifcModel):
             retval[product.id()]= {'product':product, 'shape':shape, 'materials': materialList}
     return retval
 
-shellIFCTypes= ['IfcCurtainWall', 'IfcFooting', 'IfcOpeningElement', 'IfcRailing', 'IfcRamp', 'IfcRampFlight', 'IfcReinforcingMesh', 'IfcReinforcingMesh', 'IfcSlab', 'IfcSlab', 'IfcStair', 'IfcStairFlight', 'IfcWall', 'IfcWallStandardCase']
+shellIFCTypes= ['IfcCurtainWall', 'IfcFooting', 'IfcOpeningElement', 'IfcRailing', 'IfcRamp', 'IfcRampFlight', 'IfcReinforcingMesh', 'IfcReinforcingMesh', 'IfcSlab', 'IfcPlate', 'IfcStair', 'IfcStairFlight', 'IfcWall', 'IfcWallStandardCase']
 
 beamColumnIFCTypes= ['IfcBeam','IfcBeamStandardCase', 'IfcColumn', 'IfcPile', 'IfcReinforcingBar', 'IfcTendon']
 
@@ -280,7 +282,7 @@ def computeShapesDatum(productShapes):
             lines[product.id()]= {'product':product, 'shape':shape, 'footprint':shapeFootprint, 'materials':materialList, 'ifcType': ifcType, 'axis':axis, 'length':length}
         else:
             funcName= sys._getframe(0).f_code.co_name
-            lmsg.error(funcName+'; IFC type: '+ifcType+' unknown.')
+            lmsg.error(funcName+'; IFC type: '+ifcType+' ignored.')
 
     return surfaces, lines
 
