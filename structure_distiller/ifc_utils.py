@@ -245,7 +245,6 @@ def getProductShapes(ifcModel):
         if product.is_a("IfcOpeningElement") or product.is_a("IfcSite"):
             continue
         if product.Representation is not None:
-            print(product.Name, product.is_a())
             shape= ifcopenshell.geom.create_shape(settings, product).geometry
             materialList= getMaterials(product)
             retval[product.id()]= {'product':product, 'shape':shape, 'materials': materialList}

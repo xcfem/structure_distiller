@@ -47,6 +47,8 @@ class StructureDistiller(object):
         self.building= None
         self.analysisModel= None
         self.ifcElements= list()
+        self.ifcMaterials= list()
+        self.ifcProfiles= dict()
 
     def createHeader(self):
         self.ifcModel.wrapped_data.header.file_name.name = os.path.basename(self.outputFileName)
@@ -280,8 +282,21 @@ class StructureDistiller(object):
         '''
         zVector= refSys.getKVector()
         return self.ifcModel.createIfcDirection((zVector.x, zVector.y, zVector.z))
+
+    def createMaterial(self, materialName):
+        ''' Create an IfcMaterial object.
+
+        :param MaterialName: name of the material.
+        '''
+        retval= None
+        if(materialName in self.ifcMaterials):
+            retval= self.ifcMaterials[profileName]
+        else:
+            retval= self.ifcModel.createIfcMaterial(Name= materialName)
+            self.ifcProfiles[materialName]= retval
+        return retval        
  
-    def createMaterial(self, materialData):
+    def createMaterialLayers(self, materialData):
         ''' Create IFC material from the data argument.
 
         :param materialData: dictionary containing material names and 
@@ -295,11 +310,27 @@ class StructureDistiller(object):
                 if(name==None):
                     name= 'air'
                 thickness= matData['thickness']
-                material= self.ifcModel.createIfcMaterial(name)
+                material= self.createMaterial(name)
                 materialLayer= self.ifcModel.createIfcMaterialLayer(material, thickness, None)
                 materialLayers.append(materialLayer)
             materialLayerSet= self.ifcModel.createIfcMaterialLayerSet(materialLayers, None)
             retval= self.ifcModel.createIfcMaterialLayerSetUsage(materialLayerSet, "AXIS2", "POSITIVE", 0.0)
+        return retval
+
+    def createProfile(self, profileName):
+        ''' Creates an IfcMaterialProfileSet object.
+
+        :param profileName: name of the profile.
+        '''
+        retval= None
+        if(profileName in self.ifcProfiles):
+            retval= self.ifcProfiles[profileName]
+        else:
+            retval= self.createMaterial(profileName)
+            # matProf= self.ifcModel.createIfcMaterialProfile(profileName, None, material)
+            # profileSet= self.ifcModel.createIfcMaterialProfileSet(None, None, (matProf,))
+            # retval= self.ifcModel.createIfcMaterialProfileSetUsage(profileSet)
+            self.ifcProfiles[profileName]= retval
         return retval
 
     def dumpSurfaces(self, surfaces):
@@ -318,7 +349,8 @@ class StructureDistiller(object):
             thickness= shapeData['thickness']
             surface= self.ifcModel.createIfcStructuralSurfaceMember(self.guid(), self.ownerHistory, label, None, None, self.localPlacement, prodDefShape, "SHELL", thickness)
             self.ifcElements.append(surface)
-            materialLayerSetUsage= self.createMaterial(shapeData['materials'])
+            # Set material.
+            materialLayerSetUsage= self.createMaterialLayers(shapeData['materials'])
             if(materialLayerSetUsage): # There are materials to link to the surface.
                 self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[surface], RelatingMaterial= materialLayerSetUsage)
                 
@@ -340,9 +372,17 @@ class StructureDistiller(object):
             localZAxis= self.createLocalZAxis(footprint.refSys)
             line= self.ifcModel.createIfcStructuralCurveMember(self.guid(), self.ownerHistory, label, None, None, self.localPlacement, prodDefShape, "RIGID_JOINED_MEMBER", localZAxis)
             self.ifcElements.append(line)
-            # materialLayerSetUsage= self.createMaterial(shapeData['materials'])
-            # if(materialLayerSetUsage): # There are materials to link to the surface.
-            #     self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[surface], RelatingMaterial= materialLayerSetUsage)
+            # Set material.
+            profileName= shapeData['product'].Description
+            materials= shapeData['materials']
+            if(len(materials)>0):
+                if(isinstance(materials, list)):
+                    profileName= materials[0]
+                else: # dict
+                    profileName= materials[0]['materialName']
+            profile= self.createProfile(profileName)
+            if(profile): # There is a profile to link to the surface.
+                self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[line], RelatingMaterial= profile)
         
     def write(self):
         ''' Writes the IFC file.'''
