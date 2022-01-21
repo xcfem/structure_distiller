@@ -70,6 +70,67 @@ def getLocalReferenceSystem(shape):
 
     return geom.Ref3d3d(centroidPos, centroidPos+v0, centroidPos+v1)
 
+def computeShapeDimensions(shape, refSys):
+    ''' Compute the dimensions of the shape arguments measures along the axes
+        of the reference system argument.
+
+    :param shape : TopoDS_Shape to compute the reference system for.
+    :param refSys: reference system that define the measurement directions. 
+    '''
+    box= getBoundingBox(shape)
+    pMin= geom.Pos3d(box[0][0], box[0][1], box[0][2])
+    pMax= geom.Pos3d(box[1][0], box[1][1], box[1][2])
+
+    localMin= refSys.getLocalPosition(pMin)
+    localMax= refSys.getLocalPosition(pMax)
+    return [abs(localMax.x-localMin.x), abs(localMax.y-localMin.y), abs(localMax.z-localMin.z)]
+
+def computeDimensionality(shapeDimensions, thresholdFactor= 0.2):
+    ''' Compute the dimensionality from the shape dimensions.
+
+    :param shapeDimensions: dimensions of the shape along its local axes.
+    :param thresholdFactor: factor to consider a dimension as of a lower order
+                            (if dim/maxDim<thresholdFactor => lower order dimension). 
+    '''
+    retval= 0
+    maxDimension= max(shapeDimensions) # Compute maximum dimension.
+    normalizedDimensions= [shapeDimensions[0]/maxDimension, shapeDimensions[1]/maxDimension, shapeDimensions[2]/maxDimension]
+    for d in normalizedDimensions:
+        if(d>thresholdFactor):
+            retval+= 1
+    return retval
+
+class GeometryFootprint(object):
+    ''' geometric parameters that will allow to get 
+        the mid-surface or the axis of the shape.
+
+    :ivar refSys: local reference system for the shape computed using
+                  its principal axis of inertia.
+    :ivar shapeDimensions: dimensions of the shape along its local axes.
+    :ivar dimensionality: dimensionality of the shape (0, 1, 2 or 3).
+    '''
+
+    def __init__(self, shape, thresholdFactor= 0.2):
+        ''' Compute some geometric parameters that will allow to get 
+            the mid-surface or the axis of the shape.
+
+        :param shape : TopoDS_Shape to compute the reference system for.
+        :param thresholdFactor: factor to consider a dimension as of a lower order
+                                (if dim/maxDim<thresholdFactor => lower order dimension). 
+        '''
+        self.refSys= getLocalReferenceSystem(shape)
+        self.shapeDimensions= computeShapeDimensions(shape, self.refSys)
+        self.dimensionality= computeDimensionality(self.shapeDimensions)
+
+    def getCentroid(self):
+        ''' Return the origin of the local coordinate system.'''
+        return self.refSys.getOrg()
+
+    def getAxisDirections(self):
+        ''' Return the unary vectors of the local axes.'''
+        return [self.refSys.getIVector(), self.refSys.getJVector(), self.refSys.getKVector()]
+    
+
 def getMidPlane(shape, tol= 1e-6):
     ''' Return the mid-plane of the shape argument.
 
@@ -77,18 +138,10 @@ def getMidPlane(shape, tol= 1e-6):
                    the shape to compute the bounding box from.
     :param tol: tolerance of the computed boundingbox.
     '''
-    # Compute inertia properties
-    ref= getLocalReferenceSystem(shape)
-    centroidPos= ref.getOrg()
-    shapeVectors= [ref.getIVector(), ref.getJVector(), ref.getKVector()]
-
-    box= getBoundingBox(shape)
-    pMin= geom.Pos3d(box[0][0], box[0][1], box[0][2])
-    pMax= geom.Pos3d(box[1][0], box[1][1], box[1][2])
-
-    localMin= ref.getLocalPosition(pMin)
-    localMax= ref.getLocalPosition(pMax)
-    shapeDimensions= [abs(localMax.x-localMin.x), abs(localMax.y-localMin.y), abs(localMax.z-localMin.z)]
+    shapeFootprint= GeometryFootprint(shape)
+    centroidPos= shapeFootprint.getCentroid()
+    shapeVectors= shapeFootprint.getAxisDirections()
+    shapeDimensions= shapeFootprint.shapeDimensions
 
     # Compute index of minimum dimension
     thickness, idx = min((thickness, idx) for (idx, thickness) in enumerate(shapeDimensions))
@@ -120,7 +173,6 @@ def extractWires(section):
             pt1= geom.Pos3d(x1, y1, z1)
             sg= geom.Segment3d(pt0, pt1)
             segments.append(sg)
-
 
         # A wire is formed by connecting the edges
         polylines= geom.get_3d_polylines(segments,.001)
@@ -193,13 +245,14 @@ def computeMidSurfaces(productShapes):
     for key in productShapes:
         productData= productShapes[key]
         product= productData['product']
+        ifcType= product.is_a()
         shape= productData['shape']
         materialList= productData['materials']
         midPlane, thickness, extension= getMidPlane(shape)
         midSectionFace= OCC.Core.BRepBuilderAPI.BRepBuilderAPI_MakeFace(midPlane, -extension, extension, -extension, extension).Face()
         shapeSection= OCC.Core.BRepAlgoAPI.BRepAlgoAPI_Section(midSectionFace, shape).Shape()
         midSectionWires= extractWires(shapeSection)
-        retval[product.id()]= {'product':product, 'shape':shape, 'midPlane':midPlane, 'midSection':midSectionFace, 'midSectionWires':midSectionWires, 'thickness':thickness,'materials':materialList}
+        retval[product.id()]= {'product':product, 'shape':shape, 'midPlane':midPlane, 'midSection':midSectionFace, 'midSectionWires':midSectionWires, 'thickness':thickness,'materials':materialList, 'ifcType': ifcType}
 
     return retval
 
