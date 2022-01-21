@@ -7,34 +7,15 @@ __license__= "GPL"
 __version__= "3.0"
 __email__= "l.pereztato@ciccp.es"
 
-import ifcopenshell
-from structure_distiller import structure_distiller
-from structure_distiller import ifc_utils
-            
-        
-        
-# Open the IFC file using IfcOpenShell
 import os
+from structure_distiller import test_utils
+                    
+inputFileName= '/../data/revit2011_wall1.ifc'
+outputFileName= '/tmp/test.ifc'
+projectName= os.path.basename(inputFileName).replace('.ifc','')
+
 pth= os.path.dirname(__file__)
-# print("pth= ", pth)
-if(not pth):
-  pth= "."
-fName= pth+"/../data/revit2011_wall1.ifc"
-inputFile= ifcopenshell.open(fName)
-
-
-# The geometric elements in an IFC file are the IfcProduct elements. So
-# these are stored in product_shapes.
-
-productShapes= ifc_utils.getProductShapes(inputFile)
-
-midSurfaces= ifc_utils.computeMidSurfaces(productShapes) 
-
-# Write ouput
-outputModel= structure_distiller.StructureDistiller(outputFileName= '/tmp/test.ifc', modelName= 'My Model')
-
-outputModel.setup()
-outputModel.dumpSurfaces(midSurfaces)
-outputModel.write()
+ifcModel= test_utils.openTestFile(pth, inputFileName)
+test_utils.extractSurfaces(ifcModel, outputFileName, projectName)
 
 
