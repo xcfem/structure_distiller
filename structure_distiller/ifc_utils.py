@@ -68,11 +68,13 @@ def getLocalReferenceSystem(shape):
          for row in range(3)
      ]
     eigenvalues, eigenvectors = np.linalg.eig(np.array(matrix_of_inertia))
-    v0= geom.Vector3d(eigenvectors[0][0], eigenvectors[0][1], eigenvectors[0][2])
-    v1= geom.Vector3d(eigenvectors[1][0], eigenvectors[1][1], eigenvectors[1][2])
-    v2= geom.Vector3d(eigenvectors[2][0], eigenvectors[2][1], eigenvectors[2][2])
+    sortedIndexes= np.argsort(eigenvalues)
+    i0= sortedIndexes[0]; i1= sortedIndexes[1]; i2= sortedIndexes[2]
+    v0= geom.Vector3d(eigenvectors[i0][0], eigenvectors[i0][1], eigenvectors[i0][2])
+    v1= geom.Vector3d(eigenvectors[i1][0], eigenvectors[i1][1], eigenvectors[i1][2])
+    v2= geom.Vector3d(eigenvectors[i2][0], eigenvectors[i2][1], eigenvectors[i2][2])
 
-    return geom.Ref3d3d(centroidPos, centroidPos+v0, centroidPos+v1)
+    return geom.Ref3d3d(centroidPos, centroidPos+v0, centroidPos+v2)
 
 def computeShapeDimensions(shape, refSys):
     ''' Compute the dimensions of the shape arguments measures along the axes
@@ -151,8 +153,10 @@ def getShapeMidPlane(shape, shapeFootprint, tol= 1e-6):
     # Compute index of minimum dimension
     thickness, idx = min((thickness, idx) for (idx, thickness) in enumerate(shapeDimensions))
     extension= max(shapeDimensions) # Compute maximum dimension.
-    normalVector= shapeVectors[idx]
+    #normalVector= shapeVectors[idx]
+    normalVector= shapeVectors[1]
     midPlane= OCC.Core.gp.gp_Pln( OCC.Core.gp.gp_Pnt(centroidPos.x, centroidPos.y, centroidPos.z), OCC.Core.gp.gp_Dir(normalVector.x, normalVector.y, normalVector.z) )
+    planeNormal= midPlane.Axis().Direction().XYZ()
     return midPlane, thickness, extension
 
 def getShapeAxis(shape, shapeFootprint):
@@ -169,7 +173,7 @@ def getShapeAxis(shape, shapeFootprint):
     auxVector= shapeVectors[idx]*(length/2.0)
     fromPoint= centroidPos-auxVector
     toPoint= centroidPos+auxVector
-    axis= geom.Segment3d(fromPoint, toPoint) 
+    axis= geom.Segment3d(fromPoint, toPoint)
     return axis, length
 
 def extractEdges(section):
@@ -273,6 +277,7 @@ def computeShapesDatum(productShapes):
         shapeFootprint= GeometryFootprint(shape)
         if(ifcType in shellIFCTypes):
             midPlane, thickness, extension= getShapeMidPlane(shape, shapeFootprint)
+            planeNormal= midPlane.Axis().Direction().XYZ()
             midSectionFace= OCC.Core.BRepBuilderAPI.BRepBuilderAPI_MakeFace(midPlane, -extension, extension, -extension, extension).Face()
             shapeSection= OCC.Core.BRepAlgoAPI.BRepAlgoAPI_Section(midSectionFace, shape).Shape()
             midSectionWires= extractWires(shapeSection)

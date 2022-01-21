@@ -10,8 +10,7 @@ __email__= "l.pereztato@ciccp.es"
 import os
 from structure_distiller import test_utils
                     
-#inputFileName= '/../data/south_roof.ifc'
-inputFileName= '/../data/roof.ifc'
+inputFileName= '/../data/IfcOpenHouse.ifc'
 outputFileName= '/tmp/test.ifc'
 projectName= os.path.basename(inputFileName).replace('.ifc','')
 
