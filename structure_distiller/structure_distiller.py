@@ -24,15 +24,21 @@ class StructureDistiller(object):
     :ivar ifcModel: IFC structural analysis model.
     :ivar outputFileName: name of the output file.
     '''
-    def __init__(self, outputFileName: str, modelName: str):
+    applicationName= 'XCStructureDistiller'
+    def __init__(self, outputFileName: str, projectName: str, modelName: str= None):
         ''' Constructor. 
 
         :param outputFileName: name of the output file.
+        :param projectName: human readable project name.
         :param modelName: human readable model name.
         '''
         self.ifcModel= None
         self.outputFileName= outputFileName
-        self.modelName= modelName
+        self.projectName= projectName
+        if(modelName==None):
+            self.modelName= projectName
+        else:
+            self.modelName= modelName
         self.reps= dict()
         self.ownerHistory= None
         self.globalAxes= None
@@ -76,7 +82,7 @@ class StructureDistiller(object):
             "IfcOpenShell, an open source (LGPL) software library that helps users and software developers to work with the IFC file format.",
         )
         p_o = self.ifcModel.createIfcPersonAndOrganization(person, organization)
-        application = self.ifcModel.createIfcApplication(organization, "v0.0.x", "IFC2CA", "IFC2CA")
+        application = self.ifcModel.createIfcApplication(organization, "v0.0.x", self.applicationName, self.applicationName)
         timestamp = int(datetime.now().timestamp())
         return self.ifcModel.createIfcOwnerHistory(p_o, application, "READWRITE", None, None, None, None, timestamp)
     
@@ -110,7 +116,7 @@ class StructureDistiller(object):
         
         # create project
         project = self.ifcModel.createIfcProject(
-            self.guid(), self.ownerHistory, "A Project", None, None, None, None, (self.reps["model"],), unitAssignment
+            self.guid(), self.ownerHistory, self.projectName, None, None, None, None, (self.reps["model"],), unitAssignment
         )
 
         # sitePlacement= self.createLocalPlacement()
@@ -236,7 +242,7 @@ class StructureDistiller(object):
     def createDefinitionShape(self, wires):
         ''' Create the product definition shape.
 
-        :surfaceData: 
+        :param wires: polygons defining the surface and its holes (if any).
         '''
         ifcFaceSurface= self.createSurfaceGeometry(wires)
         topologyRep = self.ifcModel.createIfcTopologyRepresentation(self.reps["reference"], "Reference", "Face", (ifcFaceSurface,))
@@ -249,18 +255,19 @@ class StructureDistiller(object):
                              thicknesses for each layer. 
         '''
         materialLayers= list()
-        for matData in materialData:
-            name= matData['materialName']
-            if(name==None):
-                name= 'air'
-            thickness= matData['thickness']
-            material= self.ifcModel.createIfcMaterial(name)
-            materialLayer= self.ifcModel.createIfcMaterialLayer(material, thickness, None)
-            materialLayers.append(materialLayer)
-            
-        materialLayerSet= self.ifcModel.createIfcMaterialLayerSet(materialLayers, None)
-        materialLayerSetUsage= self.ifcModel.createIfcMaterialLayerSetUsage(materialLayerSet, "AXIS2", "POSITIVE", 0.0)
-        return materialLayerSetUsage
+        retval= None
+        if(len(materialData)>0):       
+            for matData in materialData:
+                name= matData['materialName']
+                if(name==None):
+                    name= 'air'
+                thickness= matData['thickness']
+                material= self.ifcModel.createIfcMaterial(name)
+                materialLayer= self.ifcModel.createIfcMaterialLayer(material, thickness, None)
+                materialLayers.append(materialLayer)
+            materialLayerSet= self.ifcModel.createIfcMaterialLayerSet(materialLayers, None)
+            retval= self.ifcModel.createIfcMaterialLayerSetUsage(materialLayerSet, "AXIS2", "POSITIVE", 0.0)
+        return retval
         
 
 
@@ -274,12 +281,15 @@ class StructureDistiller(object):
             shapeData= surfaces[shapeKey]
             wires= shapeData['midSectionWires']
             prodDefShape = self.createDefinitionShape(wires)
-            label= str(shapeKey)
+            label= shapeData['product'].Name
+            if(label==None):
+                label= str(shapeKey)
             thickness= shapeData['thickness']
             surface= self.ifcModel.createIfcStructuralSurfaceMember(self.guid(), self.ownerHistory, label, None, None, self.localPlacement, prodDefShape, "SHELL", thickness)
             self.ifcElements.append(surface)
-            #materialLayerSetUsage= self.createMaterial(shapeData['materials'])
-            #self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[surface], RelatingMaterial= materialLayerSetUsage)
+            materialLayerSetUsage= self.createMaterial(shapeData['materials'])
+            if(materialLayerSetUsage): # There are materials to link to the surface.
+                self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[surface], RelatingMaterial= materialLayerSetUsage)
         
     def write(self):
         ''' Writes the IFC file.'''

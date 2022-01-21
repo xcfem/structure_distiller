@@ -42,12 +42,11 @@ def getBoundingBox(shape, tol:float =1e-6) -> tuple:
     xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
     return ((xmin, ymin, zmin), (xmax, ymax, zmax))
 
-def getMidPlane(shape, tol= 1e-6):
-    ''' Return the mid-plane of the shape argument.
+def getLocalReferenceSystem(shape):
+    ''' Return a local reference system for the shape argument using
+        the principal axis of inertia.
 
-    :param shape : TopoDS_Shape or a subclass such as TopoDS_Face
-                   the shape to compute the bounding box from.
-    :param tol: tolerance of the computed boundingbox.
+    :param shape : TopoDS_Shape to compute the reference system for.
     '''
     # Compute inertia properties
     props= GProp_GProps()
@@ -68,9 +67,20 @@ def getMidPlane(shape, tol= 1e-6):
     v0= geom.Vector3d(eigenvectors[0][0], eigenvectors[0][1], eigenvectors[0][2])
     v1= geom.Vector3d(eigenvectors[1][0], eigenvectors[1][1], eigenvectors[1][2])
     v2= geom.Vector3d(eigenvectors[2][0], eigenvectors[2][1], eigenvectors[2][2])
-    shapeVectors= [v0, v1, v2]
 
-    ref= geom.Ref3d3d(centroidPos, centroidPos+v0, centroidPos+v1)
+    return geom.Ref3d3d(centroidPos, centroidPos+v0, centroidPos+v1)
+
+def getMidPlane(shape, tol= 1e-6):
+    ''' Return the mid-plane of the shape argument.
+
+    :param shape : TopoDS_Shape or a subclass such as TopoDS_Face
+                   the shape to compute the bounding box from.
+    :param tol: tolerance of the computed boundingbox.
+    '''
+    # Compute inertia properties
+    ref= getLocalReferenceSystem(shape)
+    centroidPos= ref.getOrg()
+    shapeVectors= [ref.getIVector(), ref.getJVector(), ref.getKVector()]
 
     box= getBoundingBox(shape)
     pMin= geom.Pos3d(box[0][0], box[0][1], box[0][2])
@@ -163,10 +173,15 @@ def getProductShapes(ifcModel):
         if product.is_a("IfcOpeningElement") or product.is_a("IfcSite"):
             continue
         if product.Representation is not None:
+            print(product.Name, product.is_a())
             shape= ifcopenshell.geom.create_shape(settings, product).geometry
             materialList= getMaterials(product)
             retval[product.id()]= {'product':product, 'shape':shape, 'materials': materialList}
     return retval
+
+shellIFCTypes= ['IfcCurtainWall', 'IfcFooting', 'IfcOpeningElement', 'IfcRailing', 'IfcRamp', 'IfcRampFlight', 'IfcReinforcingMesh', 'IfcReinforcingMesh', 'IfcSlab', 'IfcSlab', 'IfcStair', 'IfcStairFlight', 'IfcWall', 'IfcWallStandardCase']
+
+beamColumnIFCTypes= ['IfcBeam', 'IfcColumn', 'IfcPile', 'IfcReinforcingBar', 'IfcTendon']
 
 def computeMidSurfaces(productShapes):
     ''' For each thin walled shape in product shapes compute the contour of 
