@@ -16,6 +16,6 @@ projectName= os.path.basename(inputFileName).replace('.ifc','')
 
 pth= os.path.dirname(__file__)
 ifcModel= test_utils.openTestFile(pth, inputFileName)
-test_utils.extractSurfaces(ifcModel, outputFileName, projectName)
+test_utils.extractDatum(ifcModel, outputFileName, projectName)
 
 

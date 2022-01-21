@@ -8,6 +8,8 @@ __license__= "GPL"
 __version__= "3.0"
 __email__= "l.pereztato@ciccp.es"
 
+import sys
+
 import ifcopenshell
 import ifcopenshell.geom
 
@@ -101,8 +103,8 @@ def computeDimensionality(shapeDimensions, thresholdFactor= 0.2):
     return retval
 
 class GeometryFootprint(object):
-    ''' geometric parameters that will allow to get 
-        the mid-surface or the axis of the shape.
+    ''' characteristic geometric parameters obtained from a shape
+        local axes, dimensions and dimensionality.
 
     :ivar refSys: local reference system for the shape computed using
                   its principal axis of inertia.
@@ -131,14 +133,15 @@ class GeometryFootprint(object):
         return [self.refSys.getIVector(), self.refSys.getJVector(), self.refSys.getKVector()]
     
 
-def getMidPlane(shape, tol= 1e-6):
+def getShapeMidPlane(shape, shapeFootprint, tol= 1e-6):
     ''' Return the mid-plane of the shape argument.
 
     :param shape : TopoDS_Shape or a subclass such as TopoDS_Face
                    the shape to compute the bounding box from.
+    :param shapeFootprint: characteristic geometric parameters obtained 
+                           the shape arguments.
     :param tol: tolerance of the computed boundingbox.
     '''
-    shapeFootprint= GeometryFootprint(shape)
     centroidPos= shapeFootprint.getCentroid()
     shapeVectors= shapeFootprint.getAxisDirections()
     shapeDimensions= shapeFootprint.shapeDimensions
@@ -149,6 +152,23 @@ def getMidPlane(shape, tol= 1e-6):
     normalVector= shapeVectors[idx]
     midPlane= OCC.Core.gp.gp_Pln( OCC.Core.gp.gp_Pnt(centroidPos.x, centroidPos.y, centroidPos.z), OCC.Core.gp.gp_Dir(normalVector.x, normalVector.y, normalVector.z) )
     return midPlane, thickness, extension
+
+def getShapeAxis(shape, shapeFootprint):
+    ''' Return the axis of the shape argument.
+
+    :param shape : TopoDS_Shape or a subclass such as TopoDS_Face
+                   the shape to compute the bounding box from.
+    :param tol: tolerance of the computed boundingbox.
+    '''
+    centroidPos= shapeFootprint.getCentroid()
+    shapeVectors= shapeFootprint.getAxisDirections()
+    shapeDimensions= shapeFootprint.shapeDimensions
+    length, idx = max((length, idx) for (idx, length) in enumerate(shapeDimensions))
+    auxVector= shapeVectors[idx]*(length/2.0)
+    fromPoint= centroidPos-auxVector
+    toPoint= centroidPos+auxVector
+    axis= geom.Segment3d(fromPoint, toPoint) 
+    return axis, length
 
 def extractEdges(section):
     ''' Return a edges of the section argument.'''
@@ -233,28 +253,37 @@ def getProductShapes(ifcModel):
 
 shellIFCTypes= ['IfcCurtainWall', 'IfcFooting', 'IfcOpeningElement', 'IfcRailing', 'IfcRamp', 'IfcRampFlight', 'IfcReinforcingMesh', 'IfcReinforcingMesh', 'IfcSlab', 'IfcSlab', 'IfcStair', 'IfcStairFlight', 'IfcWall', 'IfcWallStandardCase']
 
-beamColumnIFCTypes= ['IfcBeam', 'IfcColumn', 'IfcPile', 'IfcReinforcingBar', 'IfcTendon']
+beamColumnIFCTypes= ['IfcBeam','IfcBeamStandardCase', 'IfcColumn', 'IfcPile', 'IfcReinforcingBar', 'IfcTendon']
 
-def computeMidSurfaces(productShapes):
+def computeShapesDatum(productShapes):
     ''' For each thin walled shape in product shapes compute the contour of 
-        its mid-surface.
+        its mid-surface and for each linear shape computes its axis.
 
     :param productShapes: dictionary containing the shapes to process.
     '''
-    retval= dict()
+    surfaces= dict()
+    lines= dict()
     for key in productShapes:
         productData= productShapes[key]
         product= productData['product']
         ifcType= product.is_a()
         shape= productData['shape']
         materialList= productData['materials']
-        midPlane, thickness, extension= getMidPlane(shape)
-        midSectionFace= OCC.Core.BRepBuilderAPI.BRepBuilderAPI_MakeFace(midPlane, -extension, extension, -extension, extension).Face()
-        shapeSection= OCC.Core.BRepAlgoAPI.BRepAlgoAPI_Section(midSectionFace, shape).Shape()
-        midSectionWires= extractWires(shapeSection)
-        retval[product.id()]= {'product':product, 'shape':shape, 'midPlane':midPlane, 'midSection':midSectionFace, 'midSectionWires':midSectionWires, 'thickness':thickness,'materials':materialList, 'ifcType': ifcType}
+        shapeFootprint= GeometryFootprint(shape)
+        if(ifcType in shellIFCTypes):
+            midPlane, thickness, extension= getShapeMidPlane(shape, shapeFootprint)
+            midSectionFace= OCC.Core.BRepBuilderAPI.BRepBuilderAPI_MakeFace(midPlane, -extension, extension, -extension, extension).Face()
+            shapeSection= OCC.Core.BRepAlgoAPI.BRepAlgoAPI_Section(midSectionFace, shape).Shape()
+            midSectionWires= extractWires(shapeSection)
+            surfaces[product.id()]= {'product':product, 'shape':shape, 'footprint':shapeFootprint, 'materials':materialList, 'ifcType': ifcType, 'midPlane':midPlane, 'midSection':midSectionFace, 'midSectionWires':midSectionWires, 'thickness':thickness}
+        elif(ifcType in beamColumnIFCTypes):
+            axis, length= getShapeAxis(shape, shapeFootprint)
+            lines[product.id()]= {'product':product, 'shape':shape, 'footprint':shapeFootprint, 'materials':materialList, 'ifcType': ifcType, 'axis':axis, 'length':length}
+        else:
+            funcName= sys._getframe(0).f_code.co_name
+            lmsg.error(funcName+'; IFC type: '+ifcType+' unknown.')
 
-    return retval
+    return surfaces, lines
 
 
 

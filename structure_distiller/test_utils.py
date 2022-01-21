@@ -15,7 +15,7 @@ def openTestFile(pth, ifcFileName):
     fName= pth+"/../data/"+ifcFileName
     return ifcopenshell.open(fName)
 
-def extractSurfaces(ifcModel, ifcOutputFileName, projectName, modelName= None):
+def extractDatum(ifcModel, ifcOutputFileName, projectName, modelName= None):
     ''' Extract mid-surfraces from the IFC products of the input model.
 
     :param ifcModel: IFC input model.
@@ -26,10 +26,11 @@ def extractSurfaces(ifcModel, ifcOutputFileName, projectName, modelName= None):
     # The geometric elements in an IFC file are the IfcProduct elements. So
     # these are stored in product_shapes.
     productShapes= ifc_utils.getProductShapes(ifcModel)
-    midSurfaces= ifc_utils.computeMidSurfaces(productShapes) 
+    midSurfaces, axes= ifc_utils.computeShapesDatum(productShapes) 
 
     # Write ouput
     outputModel= structure_distiller.StructureDistiller(outputFileName= ifcOutputFileName, projectName= projectName, modelName= modelName)
     outputModel.setup()
     outputModel.dumpSurfaces(midSurfaces)
+    outputModel.dumpLines(axes)
     outputModel.write()

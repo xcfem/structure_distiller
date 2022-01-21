@@ -11,6 +11,7 @@ import xc_base
 import geom
 
 import os
+import sys
 import pwd
 from datetime import datetime
 
@@ -236,11 +237,13 @@ class StructureDistiller(object):
                     faceBounds.append(self.createFaceBound(plg= interiorWire, outerBound= False))
             retval= self.ifcModel.createIfcFaceSurface(faceBounds, ifcPlane, True)
         else:
-            print('error.')
+            className= type(self).__name__
+            methodName= sys._getframe(0).f_code.co_name
+            lmsg.error(className+'.'+methodName+': no input polygons.')
         return retval
                 
-    def createDefinitionShape(self, wires):
-        ''' Create the product definition shape.
+    def createSurfaceDefinitionShape(self, wires):
+        ''' Create the surface product definition shape.
 
         :param wires: polygons defining the surface and its holes (if any).
         '''
@@ -248,6 +251,36 @@ class StructureDistiller(object):
         topologyRep = self.ifcModel.createIfcTopologyRepresentation(self.reps["reference"], "Reference", "Face", (ifcFaceSurface,))
         return self.ifcModel.createIfcProductDefinitionShape(None, None, (topologyRep,))
 
+    def createLineGeometry(self, segment):
+        ''' Create the IfcEdge object that represents the segment argument.
+
+        :param segment: 3D segment defining the axis.
+        '''
+        p0= segment.getFromPoint()
+        p1= segment.getToPoint()
+        startPoint = self.ifcModel.createIfcCartesianPoint((p0.x, p0.y, p0.z))
+        startVertex = self.ifcModel.createIfcVertexPoint(startPoint)
+        endPoint = self.ifcModel.createIfcCartesianPoint((p1.x, p1.y, p1.z))
+        endVertex = self.ifcModel.createIfcVertexPoint(endPoint)
+        return self.ifcModel.createIfcEdge(startVertex, endVertex)
+        
+    def createLineDefinitionShape(self, segment):
+        ''' Create the linear product definition shape.
+
+        :param segment: 3D segment defining the axis.
+        '''
+        ifcEdge= self.createLineGeometry(segment)
+        topologyRep = self.ifcModel.createIfcTopologyRepresentation(self.reps["reference"], "Reference", "Edge", (ifcEdge,))
+        return self.ifcModel.createIfcProductDefinitionShape(None, None, (topologyRep,))
+
+    def createLocalZAxis(self, refSys):
+        ''' Create local z axis from the system of reference argument.
+
+        :param refSys: reference system that define the measurement directions. 
+        '''
+        zVector= refSys.getKVector()
+        return self.ifcModel.createIfcDirection((zVector.x, zVector.y, zVector.z))
+ 
     def createMaterial(self, materialData):
         ''' Create IFC material from the data argument.
 
@@ -268,8 +301,6 @@ class StructureDistiller(object):
             materialLayerSet= self.ifcModel.createIfcMaterialLayerSet(materialLayers, None)
             retval= self.ifcModel.createIfcMaterialLayerSetUsage(materialLayerSet, "AXIS2", "POSITIVE", 0.0)
         return retval
-        
-
 
     def dumpSurfaces(self, surfaces):
         ''' Create the IfcStructuralSurfaceMember objects corresponding to
@@ -280,7 +311,7 @@ class StructureDistiller(object):
         for shapeKey in surfaces:
             shapeData= surfaces[shapeKey]
             wires= shapeData['midSectionWires']
-            prodDefShape = self.createDefinitionShape(wires)
+            prodDefShape = self.createSurfaceDefinitionShape(wires)
             label= shapeData['product'].Name
             if(label==None):
                 label= str(shapeKey)
@@ -290,6 +321,28 @@ class StructureDistiller(object):
             materialLayerSetUsage= self.createMaterial(shapeData['materials'])
             if(materialLayerSetUsage): # There are materials to link to the surface.
                 self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[surface], RelatingMaterial= materialLayerSetUsage)
+                
+    def dumpLines(self, lines):
+        ''' Create the IfcStructuralSurfaceMember objects corresponding to
+            the surface arguments.
+
+        :param lines: dictionary containing line data.
+        '''
+        for shapeKey in lines:
+            shapeData= lines[shapeKey]
+            axis= shapeData['axis']
+            prodDefShape= self.createLineDefinitionShape(axis)
+            label= shapeData['product'].Name
+            if(label==None):
+                label= str(shapeKey)
+            length= shapeData['length']
+            footprint= shapeData['footprint']
+            localZAxis= self.createLocalZAxis(footprint.refSys)
+            line= self.ifcModel.createIfcStructuralCurveMember(self.guid(), self.ownerHistory, label, None, None, self.localPlacement, prodDefShape, "RIGID_JOINED_MEMBER", localZAxis)
+            self.ifcElements.append(line)
+            # materialLayerSetUsage= self.createMaterial(shapeData['materials'])
+            # if(materialLayerSetUsage): # There are materials to link to the surface.
+            #     self.ifcModel.createIfcRelAssociatesMaterial(self.guid(), self.ownerHistory, RelatedObjects=[surface], RelatingMaterial= materialLayerSetUsage)
         
     def write(self):
         ''' Writes the IFC file.'''
