@@ -9,6 +9,7 @@ __version__= "3.0"
 __email__= "l.pereztato@ciccp.es"
 
 import sys
+import math
 
 import ifcopenshell
 import ifcopenshell.geom
@@ -18,12 +19,17 @@ from misc_utils import log_messages as lmsg
 import OCC.Core.gp
 import OCC.Core.BRepBuilderAPI
 import OCC.Core.BRepAlgoAPI
+from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakePrism
 import OCC.Core.TopExp
 import OCC.Core.ShapeAnalysis
+import OCC.Core.TopoDS
+from OCC.Core.TopAbs import TopAbs_FACE
+from OCC.Core.TopExp import TopExp_Explorer
+from OCC.Core.TopoDS import topods_Face
 from OCC.Core.GProp import GProp_GProps
 from OCC.Core.BRepGProp import brepgprop_VolumeProperties
-from OCC.Core.BRepBndLib import brepbndlib_Add
-from OCC.Core.Bnd import Bnd_Box
+from OCC.Core.BRepBndLib import brepbndlib_Add, brepbndlib_AddOptimal, brepbndlib_AddOBB
+from OCC.Core.Bnd import Bnd_Box, Bnd_OBB
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeWire
 from OCC.Core.BRep import BRep_Tool
 
@@ -32,19 +38,141 @@ import geom
 import numpy as np
 
 def getBoundingBox(shape, tol:float =1e-6) -> tuple:
-    """ return the bounding box of the TopoDS_Shape `shape`
+    ''' return the bounding box of the TopoDS_Shape `shape`
 
 
     :param shape : TopoDS_Shape or a subclass such as TopoDS_Face
                    the shape to compute the bounding box from
     :param tol: tolerance of the computed boundingbox
-    """
+    '''
     bbox= Bnd_Box()
     bbox.SetGap(tol)
     brepbndlib_Add(shape, bbox, False)
 
     xmin, ymin, zmin, xmax, ymax, zmax = bbox.Get()
     return ((xmin, ymin, zmin), (xmax, ymax, zmax))
+
+def getOBB(shape, optimal_OBB=True):
+    '''return the oriented bounding box of the TopoDS_Shape `shape`
+
+    Parameters
+    ----------
+
+    shape : TopoDS_Shape or a subclass such as TopoDS_Face
+        the shape to compute the bounding box from
+    optimal_OBB : bool, True by default. If set to True, compute the
+        optimal (i.e. the smallest oriented bounding box). Optimal OBB is
+        a bit longer.
+    Returns
+    -------
+        the oriented bounding box.
+    '''
+    obb = Bnd_OBB()
+    if optimal_OBB:
+        is_triangulation_used = True
+        is_optimal = True
+        is_shape_tolerance_used = False
+        brepbndlib_AddOBB(
+            shape, obb, is_triangulation_used, is_optimal, is_shape_tolerance_used
+        )
+    else:
+        brepbndlib_AddOBB(shape, obb)
+
+    return obb
+
+def getOrientation(shape, optimal_OBB=True):
+    '''return the vectors orientation vectors of the oriented bounding box of the TopoDS_Shape `shape`
+
+    Parameters
+    ----------
+
+    shape : TopoDS_Shape or a subclass such as TopoDS_Face
+        the shape to compute the bounding box from
+    optimal_OBB : bool, True by default. If set to True, compute the
+        optimal (i.e. the smallest oriented bounding box). Optimal OBB is
+        a bit longer.
+    Returns
+    -------
+        the baricentre and three vectors.
+    '''
+    obb = getOBB(shape, optimal_OBB)
+
+    # extract the required values
+    cog = obb.Center()
+    x_direction = obb.XDirection()
+    y_direction = obb.YDirection()
+    z_direction = obb.ZDirection()
+    vx= geom.Vector3d(x_direction.X(), x_direction.Y(), x_direction.Z())
+    vy= geom.Vector3d(y_direction.X(), y_direction.Y(), y_direction.Z())
+    vz= geom.Vector3d(z_direction.X(), z_direction.Y(), z_direction.Z())
+    bary_center= geom.Pos3d(cog.X(), cog.Y(), cog.Z())
+    return bary_center, [vx, vy, vz]
+    
+
+def getOrientedBoundingbox(shape, optimal_OBB=True):
+    '''return the oriented bounding box of the TopoDS_Shape `shape`
+
+    Parameters
+    ----------
+
+    shape : TopoDS_Shape or a subclass such as TopoDS_Face
+        the shape to compute the bounding box from
+    optimal_OBB : bool, True by default. If set to True, compute the
+        optimal (i.e. the smallest oriented bounding box). Optimal OBB is
+        a bit longer.
+    Returns
+    -------
+        a list with center, x, y and z sizes
+
+        a shape
+    '''
+    obb= getOBB(shape, optimal_OBB)
+
+    # converts the bounding box to a shape
+    bary_center = obb.Center()
+    x_direction = obb.XDirection()
+    y_direction = obb.YDirection()
+    z_direction = obb.ZDirection()
+    a_half_x = obb.XHSize()
+    a_half_y = obb.YHSize()
+    a_half_z = obb.ZHSize()
+
+    ax = OCC.Core.gp.gp_XYZ(x_direction.X(), x_direction.Y(), x_direction.Z())
+    ay = OCC.Core.gp.gp_XYZ(y_direction.X(), y_direction.Y(), y_direction.Z())
+    az = OCC.Core.gp.gp_XYZ(z_direction.X(), z_direction.Y(), z_direction.Z())
+    p = OCC.Core.gp.gp_Pnt(bary_center.X(), bary_center.Y(), bary_center.Z())
+    an_axe = OCC.Core.gp.gp_Ax2(p, OCC.Core.gp.gp_Dir(z_direction), OCC.Core.gp.gp_Dir(x_direction))
+    an_axe.SetLocation(OCC.Core.gp.gp_Pnt(p.XYZ() - ax * a_half_x - ay * a_half_y - az * a_half_z))
+    a_box = BRepPrimAPI_MakeBox(
+        an_axe, 2.0 * a_half_x, 2.0 * a_half_y, 2.0 * a_half_z
+    ).Shape()
+    return bary_center, [a_half_x, a_half_y, a_half_z], a_box
+
+
+def getShapeFaces(shape):
+    ''' Return the faces of the shape argument.
+
+    :param shape : TopoDS_Shape or a subclass such as TopoDS_Face
+                   the shape to compute the bounding box from
+    '''
+    retval= list()
+    topExp = TopExp_Explorer()
+    topExp.Init(shape, TopAbs_FACE)
+
+    while topExp.More():
+        fc = topods_Face(topExp.Current())
+        retval.append(fc)
+        topExp.Next()
+
+    return retval
+
+def getAngle(vA, vB, tol= .1):
+    retval= vA.getAngle(vB)
+    if(abs(retval-math.pi)<tol):
+        retval= 0.0
+    if(abs(retval-2*math.pi)<tol):
+        retval= 0.0
+    return retval
 
 def getLocalReferenceSystem(shape):
     ''' Return a local reference system for the shape argument using
@@ -59,7 +187,6 @@ def getLocalReferenceSystem(shape):
     # Get centroid
     cog = props.CentreOfMass()
     cog_x, cog_y, cog_z = cog.Coord()
-    centroidPos= geom.Pos3d(cog_x, cog_y, cog_z)
 
     # Get inertia tensor.
     _m = props.MatrixOfInertia()
@@ -74,6 +201,24 @@ def getLocalReferenceSystem(shape):
     v1= geom.Vector3d(eigenvectors[i1][0], eigenvectors[i1][1], eigenvectors[i1][2])
     v2= geom.Vector3d(eigenvectors[i2][0], eigenvectors[i2][1], eigenvectors[i2][2])
 
+    # Get oriented bounding box.
+    bary_center, o_vectors= getOrientation(shape)
+    [vx, vy, vz]= o_vectors
+    ang_v0= [getAngle(v0, vx), getAngle(v0, vy), getAngle(v0, vz)]
+    index_v0= np.argmin(ang_v0)
+    ang_v1= [getAngle(v1, vx), getAngle(v1, vy), getAngle(v1, vz)]
+    index_v1= np.argmin(ang_v1)
+    ang_v2= [getAngle(v2, vx), getAngle(v2, vy), getAngle(v2, vz)]
+    index_v2= np.argmin(ang_v2)
+    if(index_v0==index_v2):
+        print(o_vectors)
+        print('v0: ', v0, o_vectors[index_v0], ang_v0, index_v0)
+        print('v2: ', v2, o_vectors[index_v2], ang_v2, index_v2)
+        index_v2= index_v1
+    v0= o_vectors[index_v0]
+    v2= o_vectors[index_v2]
+    centroidPos= bary_center
+    
     return geom.Ref3d3d(centroidPos, centroidPos+v0, centroidPos+v2)
 
 def computeShapeDimensions(shape, refSys):
